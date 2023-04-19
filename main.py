@@ -61,11 +61,27 @@ def essentialMat_estimation(kp1, kp2, good_matches, K):
     E, mask = cv2.findEssentialMat(pts1, pts2, cameraMatrix=K, method=cv2.RANSAC)
 
     # essential matrix decomposition
-    R1, R2, t = cv2.decomposeEssentialMat(E)
-    # print('R1={},\nR2={}\nt={}'.format(R1, R2, t))
-    return E
+    # R1, R2, t = cv2.decomposeEssentialMat(E)
+    retval, R, t, mask = cv2.recoverPose(E, pts1, pts2, K)  # pts, K...?
+    return R, t
+
+
+def triangulate(R, t, K, p1, p2):
+    Rt0 = np.hstack((np.eye(3), np.zeros((3, 1))))
+    Rt1 = np.hstack((R, t))
+    Rt1 = np.matmul(K, Rt1)
+
+    pt1 = np.transpose(p1)
+    pt2 = np.transpose(p2)
+
+    p3d = cv2.triangulatePoints(Rt0, Rt1, pt1, pt2)
+    p3d /= p3d[3]  # Homogeneous Coordinate
+    return p3d
+
+
 
 if __name__ == '__main__':
     img1, img2 = load_image(img_root)
     kp1, desc1, kp2, desc2 = extract_feature(img1, img2)
     good_matches = match_keypoints(img1, kp1, desc1, img2, kp2, desc2)
+    E = essentialMat_estimation(kp1, kp2, good_matches, K)
