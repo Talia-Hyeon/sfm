@@ -1,4 +1,3 @@
-import sys
 import os
 from os import path as osp
 
@@ -6,23 +5,12 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 
-# intrinsic matrix
-img_root = '../data/'
-txt_file = osp.join(img_root, 'K.txt')
-K = np.loadtxt(txt_file)
 
-
-def load_image(path):
+def read_files(path):
+    txt_file = osp.join(path, 'K.txt')
+    K = np.loadtxt(txt_file)
     img_file = [osp.join(path, file) for file in os.listdir(path) if file.endswith('.JPG')]
-    # for i in len(img_file) - 1:
-    #     img1 = img_file[i]
-    #     img2 = img_file[i + 1]
-    #     # load, extract feature, ..., triangulation
-    img1 = img_file[0]
-    img2 = img_file[1]
-    img1 = cv2.imread(img1, cv2.COLOR_BGR2RGB)
-    img2 = cv2.imread(img2, cv2.COLOR_BGR2RGB)  # IMREAD_GRAYSCALE
-    return img1, img2
+    return K, img_file
 
 
 def extract_feature(img1, img2):
@@ -33,9 +21,11 @@ def extract_feature(img1, img2):
     kp2, desc2 = feature.detectAndCompute(img2, None)
 
     # draw keypoints
-    img_draw = cv2.drawKeypoints(img1, kp1, None, flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    img_draw = cv2.drawKeypoints(img2, kp2, None, flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
     plt.imshow(img_draw)
-    plt.show()
+    plt.show(block=False)
+    plt.pause(2)
+    plt.close()
     return kp1, desc1, kp2, desc2
 
 
@@ -47,12 +37,14 @@ def match_keypoints(img1, kp1, desc1, img2, kp2, desc2):
 
     img_match = cv2.drawMatches(img1, kp1, img2, kp2, good_matches, img2, flags=2)
     plt.imshow(img_match)
-    plt.show()
+    plt.show(block=False)
+    plt.pause(2)
+    plt.close()
     return good_matches
 
 
 def essentialMat_estimation(kp1, kp2, good_matches, K):
-    # matches의 type(dematch): queryIndex + trainIndex
+    # matches의 class(dematch)의 attribution: queryIndex + trainIndex
     # queryIndex: 1번 img keypoint 번호
     # trainIndex: 2번 img keypoint 번호
     pts1 = np.array([kp1[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2).astype(np.float32)  # 픽셀 좌표
@@ -62,8 +54,6 @@ def essentialMat_estimation(kp1, kp2, good_matches, K):
     E, mask = cv2.findEssentialMat(pts1, pts2, cameraMatrix=K, method=cv2.RANSAC)
     pts1 = pts1[mask.ravel() == 1]  # img 1 inlier
     pts2 = pts2[mask.ravel() == 1]  # img 1 inlier
-    # print("pts1: {}".format(pts1))
-    # print("pts1'shape: {}".format(pts1.shape))
 
     # essential matrix decomposition
     retval, R, t, mask = cv2.recoverPose(E, pts1, pts2, K)
@@ -71,24 +61,7 @@ def essentialMat_estimation(kp1, kp2, good_matches, K):
     return R, t, pts1, pts2
 
 
-# Rescale to Homogeneous Coordinate
-def rescale_point(pts1, pts2, length):
-    p1 = [[]]
-    p2 = [[]]
-    for i in range(length):
-        tmp1 = pts1[i].flatten()
-        tmp1 = np.append(tmp1, 1)
-        p1 = np.append(p1, tmp1)
-        tmp2 = pts2[i].flatten()
-        tmp2 = np.append(tmp2, 1)
-        p2 = np.append(p2, tmp2)
-
-    p1 = p1.reshape((length), 3)
-    p2 = p2.reshape((length), 3)
-    return p1, p2
-
-
-def init_projMat(R, t):
+def init_projMat(K, R, t):
     Rt0 = np.hstack((np.eye(3), np.zeros((3, 1))))  # 1st camera coordinate: world coordinate
     Rt1 = np.hstack((R, t))
     Rt1 = np.matmul(K, Rt1)
@@ -107,6 +80,23 @@ def triangulate(R, t, K, p1, p2):
     p3d /= p3d[3]  # Homogeneous Coordinate
     # p3d's shape: (4,1,80)  4:x,y,z +?
     return p3d
+
+
+# Rescale to Homogeneous Coordinate
+def rescale_point(pts1, pts2, length):
+    p1 = [[]]
+    p2 = [[]]
+    for i in range(length):
+        tmp1 = pts1[i].flatten()
+        tmp1 = np.append(tmp1, 1)
+        p1 = np.append(p1, tmp1)
+        tmp2 = pts2[i].flatten()
+        tmp2 = np.append(tmp2, 1)
+        p2 = np.append(p2, tmp2)
+
+    p1 = p1.reshape((length), 3)
+    p2 = p2.reshape((length), 3)
+    return p1, p2
 
 
 # Triangulation
@@ -133,6 +123,17 @@ def make_3dpoint(Rt0, Rt1, p1, p2):
     return p3ds
 
 
+def reconstruct(K, img1, img2):
+    kp1, desc1, kp2, desc2 = extract_feature(img1, img2)
+    good_matches = match_keypoints(img1, kp1, desc1, img2, kp2, desc2)
+    R, t, pts1, pts2 = essentialMat_estimation(kp1, kp2, good_matches, K)
+    # point_3d = triangulate(R, t, K, pts1, pts2)
+    Rt0, Rt1 = init_projMat(K, R, t)
+    p1, p2 = rescale_point(pts1, pts2, len(pts1))
+    point_3d = make_3dpoint(Rt0, Rt1, p1, p2)
+    return point_3d
+
+
 def visualization(p3ds):
     X = np.array([])
     Y = np.array([])
@@ -147,17 +148,27 @@ def visualization(p3ds):
     plt.show()
 
 
-if __name__ == '__main__':
-    img1, img2 = load_image(img_root)
-    kp1, desc1, kp2, desc2 = extract_feature(img1, img2)
-    good_matches = match_keypoints(img1, kp1, desc1, img2, kp2, desc2)
-    R, t, pts1, pts2 = essentialMat_estimation(kp1, kp2, good_matches, K)
-    # point_3d = triangulate(R, t, K, pts1, pts2)
-    Rt0, Rt1 = init_projMat(R, t)
-    p1, p2 = rescale_point(pts1, pts2, len(pts1))
-    point_3d = make_3dpoint(Rt0, Rt1, p1, p2)
-    print("3d_point's shape: {}".format(point_3d.shape))
-    print(point_3d)
+def run(path):
+    K, img_file = read_files(img_root)
+
+    # baseline
+    img1 = img_file[0]
+    img2 = img_file[1]
+    img1 = cv2.imread(img1, cv2.COLOR_BGR2RGB)
+    img2 = cv2.imread(img2, cv2.COLOR_BGR2RGB)
+    point_3d = reconstruct(K, img1, img2)
+
+    # not baseline
+    for i in range(2, len(img_file)):
+        img2 = img_file[i]
+        img2 = cv2.imread(img2, cv2.COLOR_BGR2RGB)
+        point_3d_tem = reconstruct(K, img1, img2)
+        point_3d = np.hstack((point_3d, point_3d_tem))
+        print("point_3d's shape: {}".format(point_3d.shape))
+
     visualization(point_3d)
 
-    # for i in (2,len(img_file)):
+
+if __name__ == '__main__':
+    img_root = '../data/'
+    run(img_root)
