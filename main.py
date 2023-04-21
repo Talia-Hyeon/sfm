@@ -172,3 +172,4 @@ def run(path):
 if __name__ == '__main__':
     img_root = '../data/'
     run(img_root)
+    # test
