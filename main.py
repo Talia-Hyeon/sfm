@@ -13,20 +13,19 @@ def read_files(path):
     return K, img_file
 
 
-def extract_feature(img1, img2):
+def extract_feature(img):
     feature = cv2.KAZE_create()
     # feature = cv2.AKAZE_create()
     # feature = cv2.ORB_create()
-    kp1, desc1 = feature.detectAndCompute(img1, None)
-    kp2, desc2 = feature.detectAndCompute(img2, None)
+    kp, desc = feature.detectAndCompute(img, None)
 
     # draw keypoints
-    img_draw = cv2.drawKeypoints(img2, kp2, None, flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    img_draw = cv2.drawKeypoints(img, kp, None, flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
     plt.imshow(img_draw)
     plt.show(block=False)
     plt.pause(2)
     plt.close()
-    return kp1, desc1, kp2, desc2
+    return kp, desc
 
 
 def match_keypoints(img1, kp1, desc1, img2, kp2, desc2):
@@ -124,7 +123,8 @@ def make_3dpoint(Rt0, Rt1, p1, p2):
 
 
 def reconstruct(K, img1, img2):
-    kp1, desc1, kp2, desc2 = extract_feature(img1, img2)
+    kp1, desc1 = extract_feature(img1)
+    kp2, desc2 = extract_feature(img2)
     good_matches = match_keypoints(img1, kp1, desc1, img2, kp2, desc2)
     R, t, pts1, pts2 = essentialMat_estimation(kp1, kp2, good_matches, K)
     # point_3d = triangulate(R, t, K, pts1, pts2)
