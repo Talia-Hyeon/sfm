@@ -4,6 +4,7 @@ from os import path as osp
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+import open3d as o3d
 
 
 def read_files(path):
@@ -18,52 +19,55 @@ def extract_feature(img):
     # feature = cv2.AKAZE_create()
     # feature = cv2.ORB_create()
     kp, desc = feature.detectAndCompute(img, None)
-
     return kp, desc
 
 
-def create_view(self, img_files):
+def create_view(img_files):
     view_l = []
     for i in img_files:
         i_img = cv2.imread(i, cv2.COLOR_BGR2RGB)
         kp, desc = extract_feature(i_img)
-        view = {['img_path']: i, ['kp']: kp, ['desc']: desc}
+        view = {'img': i_img, 'img_path': i, 'kp': kp, 'desc': desc}
         view_l.append(view)
 
     # draw keypoints
-    img = cv2.imread(view_l[0]['img_path'], cv2.COLOR_BGR2RGB)
+    img = view_l[0]['img']
     kp = view_l[0]['kp']
     img_draw = cv2.drawKeypoints(img, kp, None, flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
     plt.imshow(img_draw)
-    plt.show()
+    # plt.show()
     return view_l
 
 
-def match_keypoints(img1, kp1, desc1, img2, kp2, desc2):
+def match_keypoints(view1, view2):
     matcher = cv2.BFMatcher_create()
-    matches = matcher.match(desc1, desc2)
+    matches = matcher.match(view1['desc'], view2['desc'])
     matches = sorted(matches, key=lambda x: x.distance)  # len(matches)  # # of matching point
-    good_matches = matches[:80]  # 좋은 매칭 결과 80개
+    good_matches = matches[:80]  # 좋은 매칭 결과 80개  -> 삭제?
 
-    img_match = cv2.drawMatches(img1, kp1, img2, kp2, good_matches, img2, flags=2)
+    # draw matches
+    img_match = cv2.drawMatches(view1['img'], view1['kp'], view2['img'], view2['kp'],
+                                good_matches, view2['img'], flags=2)
     plt.imshow(img_match)
-    plt.show(block=False)
-    plt.pause(2)
-    plt.close()
+    # plt.show()
     return good_matches
 
 
 def essentialMat_estimation(kp1, kp2, good_matches, K):
+    # preprocessing
+    pts1 = np.array([kp1[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2).astype(np.float32)  # 픽셀 좌표
+    pts2 = np.array([kp2[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2).astype(np.float32)
     # matches의 class(dematch)의 attribution: queryIndex + trainIndex
     # queryIndex: 1번 img keypoint 번호
     # trainIndex: 2번 img keypoint 번호
-    pts1 = np.array([kp1[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2).astype(np.float32)  # 픽셀 좌표
-    pts2 = np.array([kp2[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2).astype(np.float32)
     # reshape(len(good_matches),1,2)
     # pts'shape:(80, 1, 2) -> # of matches, x&y 좌표
+
     E, mask = cv2.findEssentialMat(pts1, pts2, cameraMatrix=K, method=cv2.RANSAC)
-    pts1 = pts1[mask.ravel() == 1]  # img 1 inlier
-    pts2 = pts2[mask.ravel() == 1]  # img 1 inlier
+
+    # # Removes points that have already been reconstructed in the completed views
+    # pts1 = pts1[mask.ravel() == 1]  # img 1 inlier
+    # pts2 = pts2[mask.ravel() == 1]  # img 2 inlier
 
     # essential matrix decomposition
     retval, R, t, mask = cv2.recoverPose(E, pts1, pts2, K)
@@ -80,39 +84,90 @@ def triangulate(R, t, K, p1, p2):
     pt2 = np.transpose(p2)
 
     p3d = cv2.triangulatePoints(Rt0, Rt1, pt1, pt2)
-    p3d /= p3d[3]  # Homogeneous Coordinate
-    # p3d's shape: (4,1,80)  4:x,y,z,1
+    p3d /= p3d[3]  # Homogeneous Coordinate: [[[x]] [[y]] [[z]] [[1]]]
+    # p3d's shape: (4,1,80)
+    p3d = np.squeeze(p3d)[:3]  # (4,80)
     return p3d
 
 
-def reconstruct(K, img1, img2):
-    kp1, desc1 = extract_feature(img1)
-    kp2, desc2 = extract_feature(img2)
-    good_matches = match_keypoints(img1, kp1, desc1, img2, kp2, desc2)
-    R, t, pts1, pts2 = essentialMat_estimation(kp1, kp2, good_matches, K)
-    point_3d = triangulate(R, t, K, pts1, pts2)
-    return point_3d
+def compute_PNP(K, view, points_3D, done):
+    matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+    # collects all the descriptors of the reconstructed views
+    old_descriptors = []
+    for old_view in done:
+        old_descriptors.append(old_view.descriptors)
+
+    # match old descriptors against the descriptors in the new view
+    matcher.add(old_descriptors)
+    matcher.train()
+    matches = matcher.match(queryDescriptors=view.descriptors)
+    p_3D, p_2D = np.zeros((0, 3)), np.zeros((0, 2))
+
+    # build corresponding array of 2D points and 3D points
+    for match in matches:
+        old_image_idx, new_image_kp_idx, old_image_kp_idx = match.imgIdx, match.queryIdx, match.trainIdx
+
+        if (old_image_idx, old_image_kp_idx) in point_map:
+            # obtain the 2D point from match
+            point_2D = np.array(view.keypoints[new_image_kp_idx].pt).T.reshape((1, 2))
+            p_2D = np.concatenate((p_2D, point_2D), axis=0)
+
+            # obtain the 3D point from the point_map
+            point_3D = points_3D[point_map[(old_image_idx, old_image_kp_idx)], :].T.reshape((1, 3))
+            p_3D = np.concatenate((p_3D, point_3D), axis=0)
+
+    # compute new pose using solvePnPRansac
+    _, R, t, _ = cv2.solvePnPRansac(points_3D[:, np.newaxis], p_2D[:, np.newaxis], K)
+    R, _ = cv2.Rodrigues(R)
+    return R, t
+
+
+def plot_points(done, points_3D):
+    """Saves the reconstructed 3D points to ply files using Open3D"""
+    results_path = './figure'
+    os.makedirs(results_path, exist_ok=True)
+
+    number = len(done)
+    filename = os.path.join(results_path, str(number) + '_images.ply')
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(points_3D)
+    o3d.io.write_point_cloud(filename, pcd)
+
+
+def reconstruct(K, view_l):
+    points_3D = np.zeros((0, 3))
+    done = []
+
+    # baseline
+    view1 = view_l[0]
+    view2 = view_l[1]
+    good_matches = match_keypoints(view1, view2)
+    R, t, pts1, pts2 = essentialMat_estimation(view1['kp'], view2['kp'], good_matches, K)
+    p3d = triangulate(R, t, K, pts1, pts2)
+    done.append(view1)
+    done.append(view2)
+    points_3D = np.concatenate((points_3D, p3d.T), axis=0)
+    plot_points(done, points_3D)
+
+    # not baseline
+    for i in range(2, len(view_l)):
+        view2 = view_l[i]
+        view2_R, view2_t = compute_PNP(K, view2, points_3D, done)
+
+        for i, old_view in enumerate(done):
+            matches = match_keypoints(old_view, view2)
+
+        done.append(view2)
+
+    return points_3D
 
 
 def run(path):
     K, img_files = read_files(img_root)
-
-    # baseline
-    img1 = img_files[0]
-    img2 = img_files[1]
-    img1 = cv2.imread(img1, cv2.COLOR_BGR2RGB)
-    img2 = cv2.imread(img2, cv2.COLOR_BGR2RGB)
-    point_3d = reconstruct(K, img1, img2)
-
-    # not baseline
-    for i in range(2, len(img_files)):
-        img2 = img_files[i]
-        img2 = cv2.imread(img2, cv2.COLOR_BGR2RGB)
-        point_3d_tem = reconstruct(K, img1, img2)
-        point_3d = np.hstack((point_3d, point_3d_tem))
-        print("point_3d's shape: {}".format(point_3d.shape))
+    view_l = create_view(img_files)
+    points_3D = reconstruct(K, view_l)
 
 
 if __name__ == '__main__':
-    img_root = '../data/'
+    img_root = './data/'
     run(img_root)
