@@ -101,6 +101,7 @@ def compute_PNP(K, view, points_3D, done):
     # match old descriptors against the descriptors in the new view
     matcher.add(old_descriptors)
     matcher.train()
+    # new_descriptor = np.array([view['desc']])
     matches = matcher.match(queryDescriptors=view['desc'])
 
     p_2D = np.array([view['kp'][m.trainIdx].pt for m in matches]).reshape(-1, 1, 2).astype(np.float32)
