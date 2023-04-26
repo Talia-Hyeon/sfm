@@ -41,16 +41,16 @@ def create_view(img_files):
 
 def match_keypoints(view1, view2):
     matcher = cv2.BFMatcher_create()
-    matches = matcher.match(view1['desc'], view2['desc'])
-    matches = sorted(matches, key=lambda x: x.distance)  # len(matches)  # # of matching point
-    # good_matches = matches[:80]  # 좋은 매칭 결과 80개  -> 삭제?
+    matches = matcher.knnMatch(view1['desc'], view2['desc'], k=2)
+    good_matches = [m1 for m1, m2 in matches if m1.distance < 0.95 * m2.distance]  # 좋은 매칭 결과
+    sort_matches = sorted(good_matches, key=lambda x: x.distance)  # len(matches)  # # of matching point
 
     # draw matches
     img_match = cv2.drawMatches(view1['img'], view1['kp'], view2['img'], view2['kp'],
-                                matches, view2['img'], flags=2)
+                                sort_matches, view2['img'], flags=2)
     plt.imshow(img_match)
-    # plt.show()
-    return matches
+    plt.show()
+    return sort_matches
 
 
 def essentialMat_estimation(kp1, kp2, good_matches, K):
@@ -73,6 +73,21 @@ def essentialMat_estimation(kp1, kp2, good_matches, K):
     retval, R, t, mask = cv2.recoverPose(E, pts1, pts2, K)
     # R1, R2, t = cv2.decomposeEssentialMat(E)
     return R, t, pts1, pts2
+
+
+def visualization(p3ds):
+    X = np.array([])
+    Y = np.array([])
+    Z = np.array([])  # 120
+    print("p3ds's shape: {}".format(p3ds.shape))
+    X = np.concatenate((X, p3ds[0]))
+    Y = np.concatenate((Y, p3ds[1]))
+    Z = np.concatenate((Z, p3ds[2]))
+
+    #fig = plt.figure(figsize=(15, 15))
+    ax = plt.axes(projection='3d')
+    ax.scatter3D(X, Y, Z, c='b', marker='o')
+    plt.show()
 
 
 def triangulate(R, t, K, p1, p2):
@@ -99,10 +114,10 @@ def compute_PNP(K, view, points_3D, done):
         old_descriptors.append(old_view['desc'])
 
     # match old descriptors against the descriptors in the new view
-    matcher.add(old_descriptors)
+    # matcher.add(old_descriptors)
     matcher.train()
     # new_descriptor = np.array([view['desc']])
-    matches = matcher.match(queryDescriptors=view['desc'])
+    matches = matcher.knnMatch(queryDescriptors=view['desc'], trainDesciptors=old_descriptors, k=2)
 
     p_2D = np.array([view['kp'][m.trainIdx].pt for m in matches]).reshape(-1, 1, 2).astype(np.float32)
 
@@ -139,6 +154,7 @@ def reconstruct(K, view_l):
     points_3D = np.concatenate((points_3D, p3d.T), axis=0)
     p_3D_init = points_3D
     plot_points(done, points_3D)
+    visualization(points_3D)
 
     # not baseline
     for i in range(2, len(view_l)):
