@@ -43,14 +43,14 @@ def match_keypoints(view1, view2):
     matcher = cv2.BFMatcher_create()
     matches = matcher.match(view1['desc'], view2['desc'])
     matches = sorted(matches, key=lambda x: x.distance)  # len(matches)  # # of matching point
-    good_matches = matches[:80]  # 좋은 매칭 결과 80개  -> 삭제?
+    # good_matches = matches[:80]  # 좋은 매칭 결과 80개  -> 삭제?
 
     # draw matches
     img_match = cv2.drawMatches(view1['img'], view1['kp'], view2['img'], view2['kp'],
-                                good_matches, view2['img'], flags=2)
+                                matches, view2['img'], flags=2)
     plt.imshow(img_match)
     # plt.show()
-    return good_matches
+    return matches
 
 
 def essentialMat_estimation(kp1, kp2, good_matches, K):
@@ -65,9 +65,9 @@ def essentialMat_estimation(kp1, kp2, good_matches, K):
 
     E, mask = cv2.findEssentialMat(pts1, pts2, cameraMatrix=K, method=cv2.RANSAC)
 
-    # # Removes points that have already been reconstructed in the completed views
-    # pts1 = pts1[mask.ravel() == 1]  # img 1 inlier
-    # pts2 = pts2[mask.ravel() == 1]  # img 2 inlier
+    # Removes points that have already been reconstructed in the completed views
+    pts1 = pts1[mask.ravel() == 1]  # img 1 inlier
+    pts2 = pts2[mask.ravel() == 1]  # img 2 inlier
 
     # essential matrix decomposition
     retval, R, t, mask = cv2.recoverPose(E, pts1, pts2, K)
@@ -92,29 +92,18 @@ def triangulate(R, t, K, p1, p2):
 
 def compute_PNP(K, view, points_3D, done):
     matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+
     # collects all the descriptors of the reconstructed views
     old_descriptors = []
     for old_view in done:
-        old_descriptors.append(old_view.descriptors)
+        old_descriptors.append(old_view['desc'])
 
     # match old descriptors against the descriptors in the new view
     matcher.add(old_descriptors)
     matcher.train()
-    matches = matcher.match(queryDescriptors=view.descriptors)
-    p_3D, p_2D = np.zeros((0, 3)), np.zeros((0, 2))
+    matches = matcher.match(queryDescriptors=view['desc'])
 
-    # build corresponding array of 2D points and 3D points
-    for match in matches:
-        old_image_idx, new_image_kp_idx, old_image_kp_idx = match.imgIdx, match.queryIdx, match.trainIdx
-
-        if (old_image_idx, old_image_kp_idx) in point_map:
-            # obtain the 2D point from match
-            point_2D = np.array(view.keypoints[new_image_kp_idx].pt).T.reshape((1, 2))
-            p_2D = np.concatenate((p_2D, point_2D), axis=0)
-
-            # obtain the 3D point from the point_map
-            point_3D = points_3D[point_map[(old_image_idx, old_image_kp_idx)], :].T.reshape((1, 3))
-            p_3D = np.concatenate((p_3D, point_3D), axis=0)
+    p_2D = np.array([view['kp'][m.trainIdx].pt for m in matches]).reshape(-1, 1, 2).astype(np.float32)
 
     # compute new pose using solvePnPRansac
     _, R, t, _ = cv2.solvePnPRansac(points_3D[:, np.newaxis], p_2D[:, np.newaxis], K)
@@ -147,15 +136,23 @@ def reconstruct(K, view_l):
     done.append(view1)
     done.append(view2)
     points_3D = np.concatenate((points_3D, p3d.T), axis=0)
+    p_3D_init = points_3D
     plot_points(done, points_3D)
 
     # not baseline
     for i in range(2, len(view_l)):
         view2 = view_l[i]
-        view2_R, view2_t = compute_PNP(K, view2, points_3D, done)
+        view2_R, view2_t = compute_PNP(K, view2, p_3D_init, done)
+        print("R={}\nt={}".format(view2_R, view2_t))
 
         for i, old_view in enumerate(done):
             matches = match_keypoints(old_view, view2)
+            kp1 = old_view['kp']
+            kp2 = view2['kp']
+            pts1 = np.array([kp1[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2).astype(np.float32)
+            pts2 = np.array([kp2[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2).astype(np.float32)
+            p3d = triangulate(view2_R, view2_t, K, pts1, pts2)
+            points_3D = np.concatenate((points_3D, p3d.T), axis=0)
 
         done.append(view2)
 
