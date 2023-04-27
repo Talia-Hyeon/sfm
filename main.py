@@ -10,12 +10,15 @@ import open3d as o3d
 def read_files(path):
     txt_file = osp.join(path, 'K.txt')
     K = np.loadtxt(txt_file)
-    img_filess = [osp.join(path, file) for file in os.listdir(path) if file.endswith('.JPG')]
-    return K, img_filess
+    # files=[for file in os.listdir(path) if file.endswith('.JPG')]
+    img_files = [osp.join(path, file) for file in os.listdir(path) if file.endswith('.JPG')]
+    img_files.sort()
+    return K, img_files
 
 
 def extract_feature(img):
-    feature = cv2.KAZE_create()
+    feature = cv2.SIFT_create()
+    # feature = cv2.KAZE_create()
     # feature = cv2.AKAZE_create()
     # feature = cv2.ORB_create()
     kp, desc = feature.detectAndCompute(img, None)
@@ -42,7 +45,7 @@ def create_view(img_files):
 def match_keypoints(view1, view2):
     matcher = cv2.BFMatcher_create()
     matches = matcher.knnMatch(view1['desc'], view2['desc'], k=2)
-    good_matches = [m1 for m1, m2 in matches if m1.distance < 0.95 * m2.distance]  # 좋은 매칭 결과
+    good_matches = [m1 for m1, m2 in matches if m1.distance < 0.80 * m2.distance]  # 좋은 매칭 결과
     sort_matches = sorted(good_matches, key=lambda x: x.distance)  # len(matches)  # # of matching point
 
     # draw matches
@@ -80,11 +83,11 @@ def visualization(p3ds):
     Y = np.array([])
     Z = np.array([])  # 120
     print("p3ds's shape: {}".format(p3ds.shape))
-    X = np.concatenate((X, p3ds[0]))
-    Y = np.concatenate((Y, p3ds[1]))
-    Z = np.concatenate((Z, p3ds[2]))
+    X = np.concatenate((X, p3ds[:, 0]))
+    Y = np.concatenate((Y, p3ds[:, 1]))
+    Z = np.concatenate((Z, p3ds[:, 2]))
 
-    #fig = plt.figure(figsize=(15, 15))
+    # fig = plt.figure(figsize=(15, 15))
     ax = plt.axes(projection='3d')
     ax.scatter3D(X, Y, Z, c='b', marker='o')
     plt.show()
@@ -92,11 +95,16 @@ def visualization(p3ds):
 
 def triangulate(R, t, K, p1, p2):
     Rt0 = np.hstack((np.eye(3), np.zeros((3, 1))))  # 1st camera coordinate: world coordinate
+    Rt0 = K @ Rt0
     Rt1 = np.hstack((R, t))
     Rt1 = np.matmul(K, Rt1)
 
     pt1 = np.transpose(p1)
     pt2 = np.transpose(p2)
+    pt1 = np.squeeze(pt1)
+    pt2 = np.squeeze(pt2)
+
+    print("pt1'shape:{}".format(pt1.shape))
 
     p3d = cv2.triangulatePoints(Rt0, Rt1, pt1, pt2)
     p3d /= p3d[3]  # Homogeneous Coordinate: [[[x]] [[y]] [[z]] [[1]]]
@@ -122,7 +130,7 @@ def compute_PNP(K, view, points_3D, done):
     p_2D = np.array([view['kp'][m.trainIdx].pt for m in matches]).reshape(-1, 1, 2).astype(np.float32)
 
     # compute new pose using solvePnPRansac
-    _, R, t, _ = cv2.solvePnPRansac(points_3D[:, np.newaxis], p_2D[:, np.newaxis], K)
+    _, R, t, _ = cv2.solvePnPRansac(points_3D[:, np.newaxis], p_2D[:, np.newaxis], K)  # 3d point 수정
     R, _ = cv2.Rodrigues(R)
     return R, t
 
