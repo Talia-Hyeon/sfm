@@ -10,7 +10,6 @@ import open3d as o3d
 def read_files(path):
     txt_file = osp.join(path, 'K.txt')
     K = np.loadtxt(txt_file)
-    # files=[for file in os.listdir(path) if file.endswith('.JPG')]
     img_files = [osp.join(path, file) for file in os.listdir(path) if file.endswith('.JPG')]
     img_files.sort()
     return K, img_files
@@ -19,8 +18,6 @@ def read_files(path):
 def extract_feature(img):
     feature = cv2.SIFT_create()
     # feature = cv2.KAZE_create()
-    # feature = cv2.AKAZE_create()
-    # feature = cv2.ORB_create()
     kp, desc = feature.detectAndCompute(img, None)
     return kp, desc
 
@@ -38,7 +35,7 @@ def create_view(img_files):
     kp = view_l[0]['kp']
     img_draw = cv2.drawKeypoints(img, kp, None, flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
     plt.imshow(img_draw)
-    # plt.show()
+    plt.show()
     return view_l
 
 
@@ -76,21 +73,6 @@ def essentialMat_estimation(kp1, kp2, good_matches, K):
     retval, R, t, mask = cv2.recoverPose(E, pts1, pts2, K)
     # R1, R2, t = cv2.decomposeEssentialMat(E)
     return R, t, pts1, pts2
-
-
-def visualization(p3ds):
-    X = np.array([])
-    Y = np.array([])
-    Z = np.array([])  # 120
-    print("p3ds's shape: {}".format(p3ds.shape))
-    X = np.concatenate((X, p3ds[:, 0]))
-    Y = np.concatenate((Y, p3ds[:, 1]))
-    Z = np.concatenate((Z, p3ds[:, 2]))
-
-    # fig = plt.figure(figsize=(15, 15))
-    ax = plt.axes(projection='3d')
-    ax.scatter3D(X, Y, Z, c='b', marker='o')
-    plt.show()
 
 
 def triangulate(R, t, K, p1, p2):
@@ -162,7 +144,6 @@ def reconstruct(K, view_l):
     points_3D = np.concatenate((points_3D, p3d.T), axis=0)
     p_3D_init = points_3D
     plot_points(done, points_3D)
-    visualization(points_3D)
 
     # not baseline
     for i in range(2, len(view_l)):

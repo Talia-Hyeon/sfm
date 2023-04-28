@@ -29,7 +29,7 @@ def remove_outlier_using_E(K, view1, view2, match):
 
 def triangulate(R, t, K, p1, p2):
     Rt0 = np.hstack((np.eye(3), np.zeros((3, 1))))  # 1st camera coordinate: world coordinate
-    # Rt0 = K @ Rt0
+    Rt0 = K @ Rt0
     Rt1 = np.hstack((R, t))
     Rt1 = np.matmul(K, Rt1)
 
