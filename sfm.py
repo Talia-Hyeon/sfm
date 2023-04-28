@@ -9,10 +9,8 @@ def remove_outlier_using_E(K, view1, view2, match):
     kp1 = view1['kp']
     kp2 = view2['kp']
     pixel_p1 = np.array([kp.pt for kp in kp1])[match.indice1]
-    pixel_p2= np.array([kp.pt for kp in kp2])[match.indice2]
+    pixel_p2 = np.array([kp.pt for kp in kp2])[match.indice2]
     print("pixel_p2's shape: {}".format(pixel_p1.shape))
-    # pixel_p1 = np.array([kp1[m.queryIdx].pt for m in match]).reshape(-1, 1, 2).astype(np.float32)
-    # pixel_p2 = np.array([kp2[m.trainIdx].pt for m in match]).reshape(-1, 1, 2).astype(np.float32)
     # matches의 class(dematch)의 attribution: queryIndex, trainIndex, ...
     # queryIndex: 1번 img keypoint 번호
     # trainIndex: 2번 img keypoint 번호
