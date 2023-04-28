@@ -4,6 +4,8 @@ import numpy as np
 import cv2
 import open3d as o3d
 
+from match import *
+
 
 def remove_outlier_using_E(K, view1, view2, match):
     kp1 = view1['kp']
@@ -43,8 +45,8 @@ def triangulate(R, t, K, p1, p2):
     return p3d
 
 
-def compute_PNP(K, view1, view2, exist_3D, done):
-    matches = match_keypoints(view1, view2)
+def compute_PNP(K, view1, view2, exist_3D, done, all_matches):
+    matches = all_matches[(view1['name'], view2['name'])]
 
     # build corresponding array of 2D points and 3D points
     points_3D, points_2D = np.zeros((0, 3)), np.zeros((0, 2))
@@ -97,16 +99,13 @@ def reconstruct(K, view_l, all_matches):
     # not baseline
     for i in range(2, len(view_l)):
         view2 = view_l[i]
-        view2_R, view2_t = compute_PNP(K, view2, points_3D, done)
+        view2_R, view2_t = compute_PNP(K, view1, view2, points_3D, done, all_matches)
         print("R={}\nt={}".format(view2_R, view2_t))
 
         for i, old_view in enumerate(done):
-            matches = match_keypoints(old_view, view2)
-            kp1 = old_view['kp']
-            kp2 = view2['kp']
-            pts1 = np.array([kp1[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2).astype(np.float32)
-            pts2 = np.array([kp2[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2).astype(np.float32)
-            p3d = triangulate(view2_R, view2_t, K, pts1, pts2)
+            matches = all_matches[(view1['name'], view2['name'])]
+            _ = remove_outlier_using_E(K, view1, view2, matches)
+            p3d = triangulate(view2_R, view2_t, K, matches.inlier1, matches.inlier2)
             points_3D = np.concatenate((points_3D, p3d.T), axis=0)
 
         done.append(view2)

@@ -6,8 +6,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-
-
 def extract_feature(img):
     feature = cv2.SIFT_create()
     kp, desc = feature.detectAndCompute(img, None)
